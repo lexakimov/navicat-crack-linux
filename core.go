@@ -42,7 +42,24 @@ const (
 	oldKeyBase64                    = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw1dqF3SkCaAAmMzs889IqdW9M2dIdh3jG9yPcmLnmJiGpBF4E9VHSMGe8oPAy2kJDmdNt4BcEygvssEfginva5t5jm352UAoDosUJkTXGQhpAWMF4fBmBpO3EedG62rOsqMBgmSdAyxCSPBRJIOFR0QgZFbRnU0frj34fiVmgYiLuZSAmIbs8ZxiHPdp1oD4tUpvsFci4QJtYNjNnGU2WPH6rvChGl1IRKrxMtqLielsvajUjyrgOC6NmymYMvZNER3htFEtL1eQbCyTfDmtYyQ1Wt4Ot12lxf0wVIR5mcGN7XCXJRHOFHSf1gzXWabRSvmt1nrl7sW6cjxljuuQawIDAQAB"
 )
 
-var originalBuilderPrefix = []byte{0x41, 0x57, 0xb8, 0x4d, 0x49, 0x00, 0x00, 0xba, 0x49, 0x42, 0x00, 0x00, 0x41, 0x56, 0x41, 0x55}
+var originalBuilderPrefix = []byte{
+	0x41,
+	0x57,
+	0xb8,
+	0x4d,
+	0x49,
+	0x00,
+	0x00,
+	0xba,
+	0x49,
+	0x42,
+	0x00,
+	0x00,
+	0x41,
+	0x56,
+	0x41,
+	0x55,
+}
 
 // libraryProfile contains the build-specific values used by the patcher.
 // A new binary is supported only after its checksum and every offset are verified.
@@ -99,6 +116,7 @@ func makePrivateKeyPEM() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}), nil
 }
 
@@ -111,10 +129,12 @@ func saveNewPrivateKey(path string, replace bool) error {
 	if err != nil {
 		return err
 	}
+
 	if !replace {
-		return writeNewFile(path, data, 0600)
+		return writeNewFile(path, data, 0o600)
 	}
-	return replaceFileAtomically(path, ".cryptographic-key-*", data, 0600)
+
+	return replaceFileAtomically(path, ".cryptographic-key-*", data, 0o600)
 }
 
 func checkOriginal(data []byte, profile *libraryProfile) (int, error) {
@@ -122,25 +142,31 @@ func checkOriginal(data []byte, profile *libraryProfile) (int, error) {
 	if hex.EncodeToString(sum[:]) != profile.sha256 {
 		return 0, fmt.Errorf("unsupported libcc.so SHA-256: %x", sum)
 	}
+
 	e, err := elf.NewFile(bytes.NewReader(data))
 	if err != nil {
 		return 0, err
 	}
 	defer e.Close()
+
 	if e.Class != elf.ELFCLASS64 || e.Data != elf.ELFDATA2LSB || e.Machine != elf.EM_X86_64 {
 		return 0, errors.New("expected ELF64 x86-64, little endian")
 	}
+
 	off, err := vaToOffset(e, profile.keyBuilderVA)
 	if err != nil {
 		return 0, err
 	}
+
 	builderBytes, err := fileBytesAt(data, off, len(profile.originalBuilderPrefix))
 	if err != nil {
 		return 0, err
 	}
+
 	if !bytes.Equal(builderBytes, profile.originalBuilderPrefix) {
 		return 0, errors.New("key-generator entry bytes differ from the selected build profile")
 	}
+
 	return off, nil
 }
 
@@ -150,6 +176,7 @@ func vaToOffset(e *elf.File, va uint64) (int, error) {
 			return int(p.Off + va - p.Vaddr), nil
 		}
 	}
+
 	return 0, fmt.Errorf("VA %#x is not in a file-backed PT_LOAD segment", va)
 }
 
@@ -165,19 +192,23 @@ func readPrivateKey(path string) (*rsa.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	block, _ := pem.Decode(data)
 	if block == nil {
 		return nil, errors.New("private key is not PEM")
 	}
+
 	var priv *rsa.PrivateKey
 	switch block.Type {
 	case "RSA PRIVATE KEY":
 		priv, err = x509.ParsePKCS1PrivateKey(block.Bytes)
 	case "PRIVATE KEY":
 		var key any
+
 		key, err = x509.ParsePKCS8PrivateKey(block.Bytes)
 		if err == nil {
 			var ok bool
+
 			priv, ok = key.(*rsa.PrivateKey)
 			if !ok {
 				return nil, errors.New("PKCS#8 key is not RSA")
@@ -186,15 +217,19 @@ func readPrivateKey(path string) (*rsa.PrivateKey, error) {
 	default:
 		return nil, fmt.Errorf("unsupported PEM type %q", block.Type)
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	if priv.N.BitLen() != 2048 {
 		return nil, errors.New("RSA key must be 2048 bits")
 	}
+
 	if err := priv.Validate(); err != nil {
 		return nil, err
 	}
+
 	return priv, nil
 }
 
@@ -203,14 +238,17 @@ func patchLibrary(data []byte, priv *rsa.PrivateKey, profile *libraryProfile) ([
 	if err != nil {
 		return nil, err
 	}
+
 	der, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	if err != nil {
 		return nil, err
 	}
+
 	encoded := base64.StdEncoding.EncodeToString(der)
 	if len(encoded) != len(profile.oldKeyBase64) {
 		return nil, fmt.Errorf("unexpected public key length %d", len(encoded))
 	}
+
 	stub, err := makeKeyBuilder([]byte(encoded), profile)
 	if err != nil {
 		return nil, err
@@ -219,53 +257,69 @@ func patchLibrary(data []byte, priv *rsa.PrivateKey, profile *libraryProfile) ([
 	if profile.keyBuilderVA+uint64(len(stub)) > profile.keyBuilderEndVA {
 		return nil, errors.New("key builder replacement overlaps the next function")
 	}
+
 	result := bytes.Clone(data)
+
 	builderTarget, err := fileBytesAt(result, off, len(stub))
 	if err != nil {
 		return nil, err
 	}
+
 	copy(builderTarget, stub)
+
 	e, err := elf.NewFile(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	defer e.Close()
+
 	keyOff, err := vaToOffset(e, profile.publicKeyStorageVA)
 	if err != nil {
 		return nil, err
 	}
+
 	keyOriginal, err := fileBytesAt(data, keyOff, len(encoded)+1)
 	if err != nil {
 		return nil, err
 	}
+
 	if !bytes.Equal(keyOriginal, make([]byte, len(encoded)+1)) {
 		return nil, errors.New("public key storage is not empty in the original library")
 	}
+
 	keyTarget, err := fileBytesAt(result, keyOff, len(encoded)+1)
 	if err != nil {
 		return nil, err
 	}
+
 	copy(keyTarget, encoded)
 	keyTarget[len(encoded)] = 0
+
 	wrapper, err := makeManualWrapper(profile)
 	if err != nil {
 		return nil, err
 	}
+
 	if profile.manualWrapperVA+uint64(len(wrapper)) > profile.keyBuilderEndVA {
 		return nil, errors.New("manual dialog wrapper overlaps the next function")
 	}
+
 	wrapperOff, err := vaToOffset(e, profile.manualWrapperVA)
 	if err != nil {
 		return nil, err
 	}
+
 	wrapperTarget, err := fileBytesAt(result, wrapperOff, len(wrapper))
 	if err != nil {
 		return nil, err
 	}
+
 	copy(wrapperTarget, wrapper)
+
 	if err := routeToManualDialog(data, result, profile); err != nil {
 		return nil, err
 	}
+
 	return result, nil
 }
 
@@ -275,35 +329,43 @@ func routeToManualDialog(original, patched []byte, profile *libraryProfile) erro
 		return err
 	}
 	defer e.Close()
+
 	entryOff, err := vaToOffset(e, profile.manualDialogVTableEntryVA)
 	if err != nil {
 		return err
 	}
+
 	manualEntry, err := fileBytesAt(original, entryOff, 8)
 	if err != nil {
 		return err
 	}
+
 	if binary.LittleEndian.Uint64(manualEntry) != profile.manualDialogFuncVA {
 		return errors.New("manual-dialog vtable entry differs from the selected build profile")
 	}
+
 	slotOff, err := vaToOffset(e, profile.registrationDialogVTableEntry)
 	if err != nil {
 		return err
 	}
+
 	registrationEntry, err := fileBytesAt(original, slotOff, 8)
 	if err != nil {
 		return err
 	}
+
 	if binary.LittleEndian.Uint64(registrationEntry) != profile.registrationDialogFuncVA {
 		return errors.New("registration-dialog dispatch differs from the selected build profile")
 	}
 	// The loader applies this R_X86_64_RELATIVE relocation at startup, so the
 	// relocation addend must change together with the vtable bytes.
 	r := profile.registrationDialogRelocOff
+
 	relocation, err := fileBytesAt(original, r, 24)
 	if err != nil {
 		return err
 	}
+
 	if binary.LittleEndian.Uint64(relocation[:8]) != profile.registrationDialogVTableEntry ||
 		binary.LittleEndian.Uint64(relocation[8:16]) != 8 ||
 		binary.LittleEndian.Uint64(relocation[16:24]) != profile.registrationDialogFuncVA {
@@ -315,12 +377,15 @@ func routeToManualDialog(original, patched []byte, profile *libraryProfile) erro
 	if err != nil {
 		return err
 	}
+
 	patchedRelocation, err := fileBytesAt(patched, r, 24)
 	if err != nil {
 		return err
 	}
+
 	binary.LittleEndian.PutUint64(patchedEntry, profile.manualWrapperVA)
 	binary.LittleEndian.PutUint64(patchedRelocation[16:24], profile.manualWrapperVA)
+
 	return nil
 }
 
@@ -344,9 +409,11 @@ func makeManualWrapper(profile *libraryProfile) ([]byte, error) {
 	if err := putRel32(stub[12:16], profile.registrationDialogBuilderVA, profile.manualWrapperVA+16); err != nil {
 		return nil, err
 	}
+
 	if err := putRel32(stub[21:25], profile.manualDialogFuncVA, profile.manualWrapperVA+25); err != nil {
 		return nil, err
 	}
+
 	return stub, nil
 }
 
@@ -371,9 +438,11 @@ func makeKeyBuilder(encoded []byte, profile *libraryProfile) ([]byte, error) {
 	if err := putRel32(stub[26:30], profile.publicKeyStorageVA, profile.keyBuilderVA+30); err != nil {
 		return nil, err
 	}
+
 	if err := putRel32(stub[31:35], profile.appendVA, profile.keyBuilderVA+35); err != nil {
 		return nil, err
 	}
+
 	return stub, nil
 }
 
@@ -382,34 +451,43 @@ func putRel32(dst []byte, target, next uint64) error {
 	if d < -1<<31 || d > 1<<31-1 {
 		return fmt.Errorf("relative branch from %#x to %#x is out of range", next, target)
 	}
+
 	binary.LittleEndian.PutUint32(dst, uint32(int32(d)))
+
 	return nil
 }
 
 func writeNewFile(path string, data []byte, perm os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 	if err != nil {
 		return err
 	}
+
 	n, writeErr := f.Write(data)
 	if writeErr == nil && n != len(data) {
 		writeErr = io.ErrShortWrite
 	}
+
 	if writeErr == nil {
 		writeErr = f.Sync()
 	}
+
 	closeErr := f.Close()
+
 	if writeErr != nil {
 		os.Remove(path)
 		return writeErr
 	}
+
 	if closeErr != nil {
 		os.Remove(path)
 		return closeErr
 	}
+
 	return nil
 }
 
@@ -422,22 +500,28 @@ func replaceFileAtomically(path, pattern string, data []byte, mode os.FileMode) 
 		tmp.Close()
 		os.Remove(tmp.Name())
 	}()
+
 	if err := tmp.Chmod(mode); err != nil {
 		return err
 	}
+
 	n, err := tmp.Write(data)
 	if err != nil {
 		return err
 	}
+
 	if n != len(data) {
 		return io.ErrShortWrite
 	}
+
 	if err := tmp.Sync(); err != nil {
 		return err
 	}
+
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+
 	return os.Rename(tmp.Name(), path)
 }
 
@@ -452,57 +536,76 @@ func generateSerial(version int, language string, salt [3]byte) (string, error) 
 	if version < 16 || version >= 32 {
 		return "", errors.New("this generator supports versions 16 through 31")
 	}
+
 	sig, ok := languageSignatures[language]
 	if !ok {
 		return "", fmt.Errorf("unsupported language %q", language)
 	}
+
 	data := [10]byte{0x68, 0x2a, salt[0], salt[1], salt[2], sig[0], sig[1], 0x65, byte((version - 16) << 4), 0x32}
 	key := [8]byte{0xe9, 0x7f, 0xb0, 0x60, 0x77, 0x45, 0x90, 0xae}
+
 	block, err := des.NewCipher(key[:])
 	if err != nil {
 		return "", err
 	}
+
 	block.Encrypt(data[2:10], data[2:10])
 	s := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(data[:])
 	s = strings.NewReplacer("I", "8", "O", "9").Replace(s)
+
 	return s[0:4] + "-" + s[4:8] + "-" + s[8:12] + "-" + s[12:16], nil
 }
 
-func makeActivationResponse(priv *rsa.PrivateKey, requestBase64, name, org string, when time.Time) (string, string, error) {
+func makeActivationResponse(
+	priv *rsa.PrivateKey,
+	requestBase64, name, org string,
+	when time.Time,
+) (string, string, error) {
 	clean := strings.Join(strings.Fields(requestBase64), "")
+
 	ciphertext, err := base64.StdEncoding.DecodeString(clean)
 	if err != nil {
 		return "", "", err
 	}
+
 	if len(ciphertext) != priv.Size() {
 		return "", "", fmt.Errorf("request size is %d bytes; expected %d", len(ciphertext), priv.Size())
 	}
+
 	plain, err := rsa.DecryptPKCS1v15(rand.Reader, priv, ciphertext)
 	if err != nil {
 		return "", "", fmt.Errorf("request does not decrypt with this private key: %w", err)
 	}
+
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(plain, &obj); err != nil {
 		return "", "", fmt.Errorf("request is not JSON: %w", err)
 	}
+
 	if obj == nil {
 		return "", "", errors.New("request is not a JSON object")
 	}
+
 	delete(obj, "P")
 	obj["N"], _ = json.Marshal(name)
 	obj["O"], _ = json.Marshal(org)
 	obj["T"], _ = json.Marshal(when.Unix())
+
 	response, err := json.Marshal(obj)
 	if err != nil {
 		return "", "", err
 	}
+
 	if len(response) > 240 {
 		return "", "", fmt.Errorf("response JSON is %d bytes; maximum 240", len(response))
 	}
+
 	sig, err := rsa.SignPKCS1v15(rand.Reader, priv, 0, response)
 	if err != nil {
 		return "", "", err
 	}
+
 	return base64.StdEncoding.EncodeToString(sig), string(plain), nil
 }
 
@@ -518,6 +621,7 @@ func profileForSHA256(sum string, profiles []*libraryProfile) *libraryProfile {
 			return profile
 		}
 	}
+
 	return nil
 }
 
@@ -527,6 +631,7 @@ func findLibrary(root string) (libraryFile, error) {
 
 func findLibraryWithProfiles(root string, profiles []*libraryProfile) (libraryFile, error) {
 	path := filepath.Join(root, "usr", "lib", "libcc.so")
+
 	info, err := os.Lstat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -534,34 +639,47 @@ func findLibraryWithProfiles(root string, profiles []*libraryProfile) (libraryFi
 			if prefix == "" && !filepath.IsAbs(root) {
 				prefix = "."
 			}
+
 			return libraryFile{}, fmt.Errorf("File %s\x1b[31m/usr/lib/libcc.so\x1b[0m not found", prefix)
 		}
+
 		return libraryFile{}, err
 	}
+
 	if !info.Mode().IsRegular() {
 		return libraryFile{}, fmt.Errorf("%s must be a regular file, not a symlink", path)
 	}
+
 	sum, err := fileSHA256(path)
 	if err != nil {
 		return libraryFile{}, err
 	}
+
 	if profile := profileForSHA256(sum, profiles); profile != nil {
 		return libraryFile{path: path, profile: profile}, nil
 	}
+
 	if regularFileExists(path + ".backup") {
 		backupSum, err := fileSHA256(path + ".backup")
 		if err != nil {
 			return libraryFile{}, err
 		}
+
 		if profile := profileForSHA256(backupSum, profiles); profile != nil {
 			return libraryFile{path: path, profile: profile, patched: true}, nil
 		}
 	}
+
 	var expected []string
 	for _, profile := range profiles {
 		expected = append(expected, profile.sha256)
 	}
-	return libraryFile{}, fmt.Errorf("unsupported libcc.so SHA-256: %s (expected %s)", sum, strings.Join(expected, ", "))
+
+	return libraryFile{}, fmt.Errorf(
+		"unsupported libcc.so SHA-256: %s (expected %s)",
+		sum,
+		strings.Join(expected, ", "),
+	)
 }
 
 func fileSHA256(path string) (string, error) {
@@ -570,10 +688,12 @@ func fileSHA256(path string) (string, error) {
 		return "", err
 	}
 	defer f.Close()
+
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
@@ -587,21 +707,26 @@ func patchApplicationLibrary(lib libraryFile, keyPath string) error {
 	if err != nil {
 		return err
 	}
+
 	if !info.Mode().IsRegular() {
 		return errors.New("libcc.so is not a regular file")
 	}
+
 	priv, err := readPrivateKey(keyPath)
 	if err != nil {
 		return err
 	}
+
 	original, err := os.ReadFile(lib.path)
 	if err != nil {
 		return err
 	}
+
 	patched, err := patchLibrary(original, priv, lib.profile)
 	if err != nil {
 		return err
 	}
+
 	return replaceWithBackup(lib.path, original, patched, info.Mode().Perm())
 }
 
@@ -610,16 +735,20 @@ func restoreLibraryFromBackup(lib libraryFile) error {
 	if !regularFileExists(backup) {
 		return fmt.Errorf("%s is not a regular backup file", backup)
 	}
+
 	if !regularFileExists(lib.path) {
 		return fmt.Errorf("%s is not a regular file", lib.path)
 	}
+
 	sum, err := fileSHA256(backup)
 	if err != nil {
 		return err
 	}
+
 	if sum != lib.profile.sha256 {
 		return fmt.Errorf("backup SHA-256 mismatch: %s", sum)
 	}
+
 	return os.Rename(backup, lib.path)
 }
 
@@ -628,5 +757,6 @@ func replaceWithBackup(path string, original, patched []byte, mode os.FileMode) 
 	if err := writeNewFile(backup, original, mode); err != nil {
 		return fmt.Errorf("create backup %s: %w", backup, err)
 	}
+
 	return replaceFileAtomically(path, ".libcc.so-patched-*", patched, mode)
 }
