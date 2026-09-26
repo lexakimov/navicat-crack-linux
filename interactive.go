@@ -12,125 +12,188 @@ import (
 	"time"
 )
 
-func runInteractive(root string, input io.Reader, output io.Writer) error {
-	libPath, libraryPatched, _, err := findLibrary(root)
+type menuState struct {
+	keyReady        bool
+	keyExists       bool
+	patched         bool
+	backupAvailable bool
+}
+
+type interactiveSession struct {
+	library        libraryFile
+	keyFile        string
+	keyPath        string
+	keyExists      bool
+	patchCompleted bool
+	header         string
+	history        []string
+	reader         *bufio.Reader
+	output         io.Writer
+	terminal       bool
+}
+
+func newInteractiveSession(root string, input io.Reader, output io.Writer) (*interactiveSession, error) {
+	library, err := findLibrary(root)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	header := fmt.Sprintf("Navicat 17 Premium (EN) Crack (2026)\n\nlibcc.so found: %s\nSHA-256: %s ✅\n", libPath, originalSHA256)
-	reader := bufio.NewReader(input)
-	keyFile := cryptographicKeyPath()
+	keyFile := cryptographicKeyPath(library.profile)
 	keyExists, keyUsable, err := inspectCryptographicKey(keyFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	header := fmt.Sprintf("%s\n\nlibcc.so found: %s\nSHA-256: %s ✅\n", library.profile.title, library.path, library.profile.sha256)
 	if keyExists {
 		header += fmt.Sprintf("\nPreviously generated cryptographic key found: %s\n", keyFile)
 		if !keyUsable {
 			header += "Existing cryptographic key is invalid; regenerate it with option 2.\n"
 		}
 	}
-	var keyPath string
-	if keyUsable {
-		keyPath = keyFile
+	s := &interactiveSession{
+		library:   library,
+		keyFile:   keyFile,
+		keyExists: keyExists,
+		header:    header,
+		reader:    bufio.NewReader(input),
+		output:    output,
+		terminal:  isTerminalOutput(output),
 	}
-	patchCompleted := false
-	var history []string
-	terminal := isTerminalOutput(output)
+	if keyUsable {
+		s.keyPath = keyFile
+	}
+	return s, nil
+}
+
+func runInteractive(root string, input io.Reader, output io.Writer) error {
+	s, err := newInteractiveSession(root, input, output)
+	if err != nil {
+		return err
+	}
 	firstRender := true
 	for {
-		backupAvailable := regularFileExists(libPath + ".backup")
-		renderInteractiveScreen(output, header, history, keyPath != "", keyExists, patchCompleted, backupAvailable, terminal && !firstRender)
+		renderInteractiveScreen(s.output, s.header, s.history, s.menuState(), s.terminal && !firstRender)
 		firstRender = false
-		choice, err := promptLine(reader, output, "Select: ")
+		choice, err := promptLine(s.reader, s.output, "Select: ")
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		var message string
-		switch choice {
-		case "1":
-			if !backupAvailable {
-				message = "[1] No libcc.so.backup is available."
-				break
-			}
-			err = restoreLibraryFromBackup(libPath)
-			if err == nil {
-				libraryPatched = false
-				patchCompleted = false
-				message = "[1] Restore libcc.so backup\nRestored: " + libPath
-			}
-		case "2":
-			err = saveNewPrivateKey(keyFile, keyExists)
-			if err == nil {
-				keyPath = keyFile
-				keyExists = true
-				patchCompleted = false
-				message = "[2] Key generated: " + keyPath
-				if libraryPatched {
-					message += "\nRestore and patch libcc.so again to use this key."
-				}
-			}
-		case "3":
-			if keyPath == "" {
-				message = missingCryptographicKeyMessage("3", keyExists)
-				break
-			}
-			if libraryPatched {
-				message = "[3] Restore libcc.so from backup before patching again."
-				break
-			}
-			err = patchApplicationLibrary(libPath, keyPath)
-			if err == nil {
-				libraryPatched = true
-				patchCompleted = true
-				message = "[3] Patch libcc.so...\nlibcc.so.backup created\nlibcc.so successfully patched!"
-			}
-		case "4":
-			if keyPath == "" {
-				message = missingCryptographicKeyMessage("4", keyExists)
-				break
-			}
-			var salt [3]byte
-			_, err = rand.Read(salt[:])
-			if err == nil {
-				var serial string
-				serial, err = generateSerial(17, "en", salt)
-				if err == nil {
-					message = "[4] License key: " + serial + "\nLaunch Navicat 17, enter the license key in the 'Registration...' window, then click Activate. Ignore the error, reopen 'Registration...' from the menu, and proceed to the next step."
-				}
-			}
-		case "5":
-			if !patchCompleted {
-				message = "[5] Patch libcc.so with option 3 first."
-				break
-			}
-			if terminal {
-				renderInteractiveOutput(output, header, history)
-			}
-			var code, transcript string
-			code, transcript, err = activateInteractive(reader, output, keyPath)
-			if err == nil {
-				message = transcript + "\n\nGenerated Activation Code:\n" + code
-			}
-		case "6":
-			if terminal {
-				renderInteractiveOutput(output, header, history)
-			}
-			fmt.Fprintln(output, "[6] Good Bye!")
-			return nil
-		default:
-			message = "Choose 1, 2, 3, 4, 5 or 6."
-		}
+		message, done, err := s.execute(choice)
 		if err != nil {
 			message = fmt.Sprintf("[%s] Error: %v", choice, err)
 		}
 		if message != "" {
-			history = append(history, message)
+			s.history = append(s.history, message)
+		}
+		if done {
+			return nil
 		}
 	}
+}
+
+func (s *interactiveSession) menuState() menuState {
+	return menuState{
+		keyReady:        s.keyPath != "",
+		keyExists:       s.keyExists,
+		patched:         s.patchCompleted,
+		backupAvailable: regularFileExists(s.library.path + ".backup"),
+	}
+}
+
+func (s *interactiveSession) execute(choice string) (message string, done bool, err error) {
+	switch choice {
+	case "1":
+		message, err = s.restoreLibrary()
+	case "2":
+		message, err = s.regenerateKey()
+	case "3":
+		message, err = s.patchLibrary()
+	case "4":
+		message, err = s.generateLicenseKey()
+	case "5":
+		message, err = s.activate()
+	case "6":
+		if s.terminal {
+			renderInteractiveOutput(s.output, s.header, s.history)
+		}
+		fmt.Fprintln(s.output, "[6] Good Bye!")
+		return "", true, nil
+	default:
+		message = "Choose 1, 2, 3, 4, 5 or 6."
+	}
+	return message, false, err
+}
+
+func (s *interactiveSession) restoreLibrary() (string, error) {
+	if !regularFileExists(s.library.path + ".backup") {
+		return "[1] No libcc.so.backup is available.", nil
+	}
+	if err := restoreLibraryFromBackup(s.library); err != nil {
+		return "", err
+	}
+	s.library.patched = false
+	s.patchCompleted = false
+	return "[1] Restore libcc.so backup\nRestored: " + s.library.path, nil
+}
+
+func (s *interactiveSession) regenerateKey() (string, error) {
+	if err := saveNewPrivateKey(s.keyFile, s.keyExists); err != nil {
+		return "", err
+	}
+	s.keyPath = s.keyFile
+	s.keyExists = true
+	s.patchCompleted = false
+	message := "[2] Key generated: " + s.keyPath
+	if s.library.patched {
+		message += "\nRestore and patch libcc.so again to use this key."
+	}
+	return message, nil
+}
+
+func (s *interactiveSession) patchLibrary() (string, error) {
+	if s.keyPath == "" {
+		return missingCryptographicKeyMessage("3", s.keyExists), nil
+	}
+	if s.library.patched {
+		return "[3] Restore libcc.so from backup before patching again.", nil
+	}
+	if err := patchApplicationLibrary(s.library, s.keyPath); err != nil {
+		return "", err
+	}
+	s.library.patched = true
+	s.patchCompleted = true
+	return "[3] Patch libcc.so...\nlibcc.so.backup created\nlibcc.so successfully patched!", nil
+}
+
+func (s *interactiveSession) generateLicenseKey() (string, error) {
+	if s.keyPath == "" {
+		return missingCryptographicKeyMessage("4", s.keyExists), nil
+	}
+	var salt [3]byte
+	if _, err := rand.Read(salt[:]); err != nil {
+		return "", err
+	}
+	serial, err := generateSerial(s.library.profile.serialVersion, s.library.profile.language, salt)
+	if err != nil {
+		return "", err
+	}
+	return "[4] License key: " + serial + "\nLaunch " + s.library.profile.productName + ", enter the license key in the 'Registration...' window, then click Activate. Ignore the error, reopen 'Registration...' from the menu, and proceed to the next step.", nil
+}
+
+func (s *interactiveSession) activate() (string, error) {
+	if !s.patchCompleted {
+		return "[5] Patch libcc.so with option 3 first.", nil
+	}
+	if s.terminal {
+		renderInteractiveOutput(s.output, s.header, s.history)
+	}
+	code, transcript, err := activateInteractive(s.reader, s.output, s.keyPath)
+	if err != nil {
+		return "", err
+	}
+	return transcript + "\n\nGenerated Activation Code:\n" + code, nil
 }
 
 func inspectCryptographicKey(path string) (exists, usable bool, err error) {
@@ -165,15 +228,15 @@ func isTerminalOutput(output io.Writer) bool {
 }
 
 func renderInteractiveOutput(output io.Writer, header string, history []string) {
-	fmt.Fprint(output, "\x1b[H\x1b[2J")
-	fmt.Fprint(output, header)
-	for _, message := range history {
-		fmt.Fprintf(output, "\n%s\n", message)
-	}
-	fmt.Fprintln(output)
+	renderInteractiveBody(output, header, history, true)
 }
 
-func renderInteractiveScreen(output io.Writer, header string, history []string, keyReady, keyExists, patched, backupAvailable, clear bool) {
+func renderInteractiveScreen(output io.Writer, header string, history []string, state menuState, clear bool) {
+	renderInteractiveBody(output, header, history, clear)
+	printInteractiveMenu(output, state)
+}
+
+func renderInteractiveBody(output io.Writer, header string, history []string, clear bool) {
 	if clear {
 		fmt.Fprint(output, "\x1b[H\x1b[2J")
 	}
@@ -182,21 +245,20 @@ func renderInteractiveScreen(output io.Writer, header string, history []string, 
 		fmt.Fprintf(output, "\n%s\n", message)
 	}
 	fmt.Fprintln(output)
-	printInteractiveMenu(output, keyReady, keyExists, patched, backupAvailable)
 }
 
-func printInteractiveMenu(output io.Writer, keyReady, keyExists, patched, backupAvailable bool) {
+func printInteractiveMenu(output io.Writer, state menuState) {
 	useDim := isTerminalOutput(output)
 	fmt.Fprintln(output, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	printMenuItem(output, "[1] Restore libcc.so backup", backupAvailable, useDim)
-	if keyExists {
+	printMenuItem(output, "[1] Restore libcc.so backup", state.backupAvailable, useDim)
+	if state.keyExists {
 		fmt.Fprintln(output, "[2] Regenerate cryprographic key")
 	} else {
 		fmt.Fprintln(output, "[2] Generate cryprographic key")
 	}
-	printMenuItem(output, "[3] Patch libcc.so", keyReady, useDim)
-	printMenuItem(output, "[4] Generate license key", keyReady, useDim)
-	printMenuItem(output, "[5] Activate with activation request", patched, useDim)
+	printMenuItem(output, "[3] Patch libcc.so", state.keyReady, useDim)
+	printMenuItem(output, "[4] Generate license key", state.keyReady, useDim)
+	printMenuItem(output, "[5] Activate with activation request", state.patched, useDim)
 	fmt.Fprintln(output, "[6] Exit")
 	fmt.Fprintln(output)
 }

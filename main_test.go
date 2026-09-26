@@ -40,8 +40,13 @@ func TestRecoveredOriginalKey(t *testing.T) {
 
 func TestCryptographicKeyPathAndRegeneration(t *testing.T) {
 	want := filepath.Join("/tmp", "navicat17-crack-key-"+originalSHA256[:12]+".pem")
-	if got := cryptographicKeyPath(); got != want {
+	if got := cryptographicKeyPath(&profile17310); got != want {
 		t.Fatalf("key path = %q, want %q", got, want)
+	}
+	other := profile17310
+	other.sha256 = "abcdef012345" + originalSHA256[12:]
+	if got := cryptographicKeyPath(&other); got != filepath.Join("/tmp", "navicat17-crack-key-abcdef012345.pem") {
+		t.Fatalf("another build's key path = %q", got)
 	}
 
 	path := filepath.Join(t.TempDir(), "key.pem")
@@ -135,7 +140,7 @@ func TestFindLibraryRejectsWrongFileAndSymlink(t *testing.T) {
 	if err := os.WriteFile(lib, []byte("wrong version"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := findLibrary(root); err == nil || !strings.Contains(err.Error(), "SHA-256") {
+	if _, err := findLibrary(root); err == nil || !strings.Contains(err.Error(), "SHA-256") {
 		t.Fatalf("expected checksum error, got %v", err)
 	}
 	if err := os.Remove(lib); err != nil {
@@ -144,7 +149,7 @@ func TestFindLibraryRejectsWrongFileAndSymlink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "target"), lib); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := findLibrary(root); err == nil || !strings.Contains(err.Error(), "symlink") {
+	if _, err := findLibrary(root); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("expected symlink error, got %v", err)
 	}
 }
@@ -154,16 +159,79 @@ func TestFindLibraryRequiresExactPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "libcc.so"), []byte("unrelated"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err := findLibrary(root)
+	_, err := findLibrary(root)
 	want := "File " + root + "\x1b[31m/usr/lib/libcc.so\x1b[0m not found"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %q, want %q", err, want)
 	}
 }
 
+func TestFindLibrarySelectsProfileFromOriginalOrBackup(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "usr", "lib", "libcc.so")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte("a different build")
+	sum := sha256.Sum256(original)
+	profile := &libraryProfile{sha256: hex.EncodeToString(sum[:])}
+	profiles := []*libraryProfile{&profile17310, profile}
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := findLibraryWithProfiles(root, profiles)
+	if err != nil || lib.profile != profile || lib.patched {
+		t.Fatalf("original profile selection: lib=%+v err=%v", lib, err)
+	}
+	if err := os.WriteFile(path+".backup", original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("patched build"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	lib, err = findLibraryWithProfiles(root, profiles)
+	if err != nil || lib.profile != profile || !lib.patched {
+		t.Fatalf("patched profile selection: lib=%+v err=%v", lib, err)
+	}
+}
+
+func TestFileBytesAtRejectsOutOfBoundsRanges(t *testing.T) {
+	data := []byte{1, 2, 3}
+	for _, test := range []struct{ off, size int }{{-1, 1}, {0, -1}, {2, 2}, {4, 0}} {
+		if _, err := fileBytesAt(data, test.off, test.size); err == nil {
+			t.Fatalf("range %d:%d should fail", test.off, test.off+test.size)
+		}
+	}
+	if got, err := fileBytesAt(data, 1, 2); err != nil || !bytes.Equal(got, data[1:]) {
+		t.Fatalf("valid range: %v, %v", got, err)
+	}
+}
+
+func TestPatchLibraryWithOriginalFixture(t *testing.T) {
+	path := os.Getenv("NAVICAT_ORIGINAL_LIBCC")
+	if path == "" {
+		t.Skip("set NAVICAT_ORIGINAL_LIBCC to test the verified 17.3.10 binary")
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched, err := patchLibrary(original, key, &profile17310)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(patched) != len(original) || bytes.Equal(patched, original) {
+		t.Fatal("patch must modify the library without changing its size")
+	}
+}
+
 func TestMenuItemsHaveNoLockExplanations(t *testing.T) {
 	var output bytes.Buffer
-	printInteractiveMenu(&output, false, false, false, false)
+	printInteractiveMenu(&output, menuState{})
 	menu := output.String()
 	if !strings.HasPrefix(menu, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[1] Restore libcc.so backup\n") {
 		t.Fatalf("menu separator missing or misplaced: %q", menu)
@@ -177,7 +245,7 @@ func TestMenuItemsHaveNoLockExplanations(t *testing.T) {
 		}
 	}
 	output.Reset()
-	printInteractiveMenu(&output, false, true, false, false)
+	printInteractiveMenu(&output, menuState{keyExists: true})
 	if !strings.Contains(output.String(), "[2] Regenerate cryprographic key\n") || strings.Contains(output.String(), "[2] Generate cryprographic key\n") {
 		t.Fatalf("existing key should change option 2 label: %q", output.String())
 	}
@@ -198,7 +266,7 @@ func TestCommandOutputRendersAboveSingleMenu(t *testing.T) {
 	renderInteractiveScreen(&output, "Navicat 17 Premium (EN) Crack (2026)\n\nlibcc.so found: /app/usr/lib/libcc.so\nSHA-256: test ✅\n", []string{
 		"[2] Key generated: /tmp/key.pem",
 		"License key: NAVC-TEST-TEST-TEST",
-	}, true, false, false, false, false)
+	}, menuState{keyReady: true}, false)
 	screen := output.String()
 	if strings.Count(screen, "[2] Generate cryprographic key") != 1 {
 		t.Fatalf("menu should be rendered once: %q", screen)
@@ -257,7 +325,7 @@ func TestSerial17KnownVector(t *testing.T) {
 }
 
 func TestKeyBuilderPayload(t *testing.T) {
-	stub, err := makeKeyBuilder([]byte(oldKeyBase64))
+	stub, err := makeKeyBuilder([]byte(oldKeyBase64), &profile17310)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +343,7 @@ func TestKeyBuilderPayload(t *testing.T) {
 }
 
 func TestManualWrapperTargets(t *testing.T) {
-	stub, err := makeManualWrapper()
+	stub, err := makeManualWrapper(&profile17310)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,6 +357,11 @@ func TestManualWrapperTargets(t *testing.T) {
 	}
 	if manualWrapperVA+uint64(len(stub)) >= keyBuilderEndVA {
 		t.Fatal("manual wrapper overlaps the next function")
+	}
+	invalid := profile17310
+	invalid.dialogFieldOffset = 0x80
+	if _, err := makeManualWrapper(&invalid); err == nil {
+		t.Fatal("a positive offset that does not fit disp8 must be rejected")
 	}
 }
 
