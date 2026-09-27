@@ -1,8 +1,8 @@
-# Navicat 17 Premium (EN) Linux Crack
+# Navicat Premium (EN) Linux Crack
 
-This tool currently supports the Linux x86_64 **Navicat Premium 17.3.10** build. It verifies `usr/lib/libcc.so` before making any changes and rejects other builds.
+This tool currently supports the Linux x86_64 **Navicat Premium 17.3.10** and **Navicat Premium 18.0.2** build. It verifies `usr/lib/libcc.so` before making any changes and rejects other builds.
 
-1. Download `navicat17-premium-en-x86_64.AppImage` from the [official Navicat website](https://www.navicat.com/en/download/navicat-premium). Make sure it is the supported 17.3.10 build.
+1. Download `navicat17-premium-en-x86_64.AppImage` from the [official Navicat website](https://www.navicat.com/en/download/navicat-premium). Make sure it is the supported 17.3.10 or 18.0.2 build.
 
 2. In the directory containing the AppImage, make it executable and extract it. The files will appear in `squashfs-root`.
 
@@ -34,4 +34,4 @@ This tool currently supports the Linux x86_64 **Navicat Premium 17.3.10** build.
    ./navicat17-premium-en-x86_64-repack.AppImage
    ```
 
-The source code in this repository is licensed under the [MIT License](LICENSE). This license does not cover Navicat or its AppImage.
+The source code in this repository is licensed under the [MIT License](LICENSE).

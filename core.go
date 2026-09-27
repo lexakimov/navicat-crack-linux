@@ -105,7 +105,32 @@ var profile17310 = libraryProfile{
 	dialogFieldOffset:             0x70,
 }
 
-var supportedProfiles = []*libraryProfile{&profile17310}
+// Linux x86-64 Navicat Premium 18.0.2. These addresses were checked against
+// the original ELF's code, vtable and R_X86_64_RELATIVE relocation.
+var profile1802 = libraryProfile{
+	title:                         "Navicat 18 Premium (EN) Crack (2026)",
+	productName:                   "Navicat 18",
+	keyFilePrefix:                 "navicat18-crack-key-",
+	sha256:                        "6c45353fea04ba4b941aef2477fe9fa4997c77cee6380c3abc60f87f404e8e57",
+	serialVersion:                 18,
+	language:                      "en",
+	originalBuilderPrefix:         originalBuilderPrefix,
+	oldKeyBase64:                  oldKeyBase64,
+	keyBuilderVA:                  0xa06c070,
+	keyBuilderEndVA:               0xa06c17b,
+	publicKeyStorageVA:            0x32ed400,
+	manualWrapperVA:               0xa06c0b0,
+	appendVA:                      0x6078520,
+	registrationDialogBuilderVA:   0xa067d80,
+	registrationDialogVTableEntry: 0xc2685b8,
+	registrationDialogRelocOff:    0x59a110,
+	registrationDialogFuncVA:      0xa08b840,
+	manualDialogVTableEntryVA:     0xc268628,
+	manualDialogFuncVA:            0xa05f900,
+	dialogFieldOffset:             0x70,
+}
+
+var supportedProfiles = []*libraryProfile{&profile17310, &profile1802}
 
 func privateKeyPath(profile *libraryProfile) string {
 	return filepath.Join("/tmp", profile.keyFilePrefix+profile.sha256[:12]+".pem")

@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"debug/elf"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -265,6 +266,50 @@ func TestPatchLibraryWithOriginalFixture(t *testing.T) {
 
 	if len(patched) != len(original) || bytes.Equal(patched, original) {
 		t.Fatal("patch must modify the library without changing its size")
+	}
+}
+
+func TestPatchLibraryWith18Fixture(t *testing.T) {
+	path := os.Getenv("NAVICAT_18_ORIGINAL_LIBCC")
+	if path == "" {
+		t.Skip("set NAVICAT_18_ORIGINAL_LIBCC to test the verified 18.0.2 binary")
+	}
+
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	patched, err := patchLibrary(original, key, &profile1802)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(patched) != len(original) || bytes.Equal(patched, original) {
+		t.Fatal("patch must modify the library without changing its size")
+	}
+
+	e, err := elf.NewFile(bytes.NewReader(original))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+
+	slotOff, err := vaToOffset(e, profile1802.registrationDialogVTableEntry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := binary.LittleEndian.Uint64(patched[slotOff:]); got != profile1802.manualWrapperVA {
+		t.Fatalf("registration vtable points to %#x, want wrapper %#x", got, profile1802.manualWrapperVA)
+	}
+	if got := binary.LittleEndian.Uint64(patched[profile1802.registrationDialogRelocOff+16:]); got != profile1802.manualWrapperVA {
+		t.Fatalf("registration relocation points to %#x, want wrapper %#x", got, profile1802.manualWrapperVA)
 	}
 }
 

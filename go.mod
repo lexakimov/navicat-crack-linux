@@ -1,3 +1,3 @@
-module navicat17crack
+module navicat-crack
 
 go 1.23
