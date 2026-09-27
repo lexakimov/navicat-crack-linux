@@ -53,9 +53,10 @@ type menuState struct {
 }
 
 type interactiveSession struct {
+	metadata       appMetadata
 	library        libraryFile
-	keyFile        string
 	keyPath        string
+	keyFile        string
 	keyExists      bool
 	patchCompleted bool
 	header         string
@@ -70,9 +71,12 @@ func newInteractiveSession(root string, input io.Reader, output io.Writer) (*int
 	if err != nil {
 		return nil, err
 	}
+	metadata, err := detectAppMetadata(root)
+	if err != nil {
+		return nil, err
+	}
 
-	keyFile := privateKeyPath(library.profile)
-
+	keyFile := privateKeyPath(metadata.version)
 	keyExists, keyUsable, err := inspectPrivateKey(keyFile)
 	if err != nil {
 		return nil, err
@@ -80,7 +84,7 @@ func newInteractiveSession(root string, input io.Reader, output io.Writer) (*int
 
 	header := fmt.Sprintf(
 		"Navicat Linux Crack (2026)\n\nhttps://github.com/lexakimov/navicat-linux-crack\n\n%s\nlibcc.so found: %s\nSHA-256: %s ✅\n",
-		library.profile.title,
+		metadata.displayName(),
 		library.path,
 		library.profile.sha256,
 	)
@@ -92,6 +96,7 @@ func newInteractiveSession(root string, input io.Reader, output io.Writer) (*int
 	}
 
 	s := &interactiveSession{
+		metadata:  metadata,
 		library:   library,
 		keyFile:   keyFile,
 		keyExists: keyExists,
@@ -203,12 +208,12 @@ func (s *interactiveSession) generateLicenseKey() (string, error) {
 		return "", err
 	}
 
-	serial, err := generateLicenseKey(s.library.profile.serialVersion, s.library.profile.language, salt)
+	serial, err := generateLicenseKey(s.metadata.major, s.metadata.language, salt)
 	if err != nil {
 		return "", err
 	}
 
-	return "[4] License key: " + serial + "\nLaunch " + s.library.profile.productName + ", enter the license key in the \"Registration\" window, then click Activate.\nIgnore the error, reopen \"Registration\" from the menu, and proceed to the next step.", nil
+	return "[4] License key: " + serial + "\nLaunch " + s.metadata.productName() + ", enter the license key in the \"Registration\" window, then click Activate.\nIgnore the error, reopen \"Registration\" from the menu, and proceed to the next step.", nil
 }
 
 func (s *interactiveSession) activate() (string, error) {

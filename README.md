@@ -1,4 +1,4 @@
-# Navicat Premium (EN) Linux Crack
+# Navicat Linux Crack
 
 This tool currently supports the Linux x86_64 **Navicat Premium 17.3.10** and **Navicat Premium 18.0.2** build. It verifies `usr/lib/libcc.so` before making any changes and rejects other builds.
 

@@ -19,100 +19,74 @@ import (
 	"strings"
 )
 
-// These addresses and the SHA-256 identify the original Linux x86-64 17.3.10
-// libcc.so. Never use these offsets on a different build.
+// Recovered public key of the original 17.3.10 build.
 const (
-	keyBuilderVA                    = uint64(0x958ecb0)
-	keyBuilderEndVA                 = uint64(0x958ed9e)
-	publicKeyStorageVA              = uint64(0x3079000)
-	manualWrapperVA                 = keyBuilderVA + 0x40
-	appendVA                        = uint64(0x5f0d1f0)
-	registrationDialogBuilderVA     = uint64(0x9584ac0)
-	registrationDialogVTableEntryVA = uint64(0xb404c98)
-	registrationDialogRelocOff      = 0x4949d0
-	registrationDialogFuncVA        = uint64(0x95b71a0)
-	manualDialogVTableEntryVA       = uint64(0xb404d08)
-	manualDialogFuncVA              = uint64(0x9582ae0)
-	oldKeySHA256                    = "6ef55cbdbe991339f8b01b5b925f856cfab5c38b4189dbac125f655efd1a1dd5"
-	oldKeyBase64                    = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw1dqF3SkCaAAmMzs889IqdW9M2dIdh3jG9yPcmLnmJiGpBF4E9VHSMGe8oPAy2kJDmdNt4BcEygvssEfginva5t5jm352UAoDosUJkTXGQhpAWMF4fBmBpO3EedG62rOsqMBgmSdAyxCSPBRJIOFR0QgZFbRnU0frj34fiVmgYiLuZSAmIbs8ZxiHPdp1oD4tUpvsFci4QJtYNjNnGU2WPH6rvChGl1IRKrxMtqLielsvajUjyrgOC6NmymYMvZNER3htFEtL1eQbCyTfDmtYyQ1Wt4Ot12lxf0wVIR5mcGN7XCXJRHOFHSf1gzXWabRSvmt1nrl7sW6cjxljuuQawIDAQAB"
+	oldKeySHA256 = "6ef55cbdbe991339f8b01b5b925f856cfab5c38b4189dbac125f655efd1a1dd5"
+	oldKeyBase64 = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw1dqF3SkCaAAmMzs889IqdW9M2dIdh3jG9yPcmLnmJiGpBF4E9VHSMGe8oPAy2kJDmdNt4BcEygvssEfginva5t5jm352UAoDosUJkTXGQhpAWMF4fBmBpO3EedG62rOsqMBgmSdAyxCSPBRJIOFR0QgZFbRnU0frj34fiVmgYiLuZSAmIbs8ZxiHPdp1oD4tUpvsFci4QJtYNjNnGU2WPH6rvChGl1IRKrxMtqLielsvajUjyrgOC6NmymYMvZNER3htFEtL1eQbCyTfDmtYyQ1Wt4Ot12lxf0wVIR5mcGN7XCXJRHOFHSf1gzXWabRSvmt1nrl7sW6cjxljuuQawIDAQAB"
 )
 
 var originalBuilderPrefix = []byte{
-	0x41,
-	0x57,
-	0xb8,
-	0x4d,
-	0x49,
-	0x00,
-	0x00,
-	0xba,
-	0x49,
-	0x42,
-	0x00,
-	0x00,
-	0x41,
-	0x56,
-	0x41,
-	0x55,
+	0x41, 0x57, 0xb8, 0x4d, 0x49, 0x00, 0x00, 0xba, 0x49, 0x42, 0x00, 0x00, 0x41, 0x56, 0x41, 0x55,
 }
 
 // libraryProfile contains the build-specific values used by the patcher.
 // A new binary is supported only after its checksum and every offset are verified.
 type libraryProfile struct {
-	title                         string
-	productName                   string
-	keyFilePrefix                 string
-	sha256                        string
-	serialVersion                 int
-	language                      string
-	originalBuilderPrefix         []byte
-	oldKeyBase64                  string
-	keyBuilderVA                  uint64
-	keyBuilderEndVA               uint64
-	publicKeyStorageVA            uint64
-	manualWrapperVA               uint64
-	appendVA                      uint64
-	registrationDialogBuilderVA   uint64
+	// sha256 identifies the exact unmodified libcc.so build.
+	sha256 string
+	// originalBuilderPrefix verifies the key builder before replacing its entry.
+	originalBuilderPrefix []byte
+	// oldKeyBase64 supplies the required length of the replacement public key.
+	oldKeyBase64 string
+	// keyBuilderVA is the virtual address where the replacement key builder starts.
+	keyBuilderVA uint64
+	// keyBuilderEndVA is the upper boundary of code available for both injected stubs.
+	keyBuilderEndVA uint64
+	// publicKeyStorageVA is an empty, file-backed virtual address for the public key.
+	publicKeyStorageVA uint64
+	// manualWrapperVA is the virtual address of the injected dialog wrapper.
+	manualWrapperVA uint64
+	// appendVA is the virtual address of std::string::append(const char*).
+	appendVA uint64
+	// registrationDialogBuilderVA creates the ordinary registration dialog.
+	registrationDialogBuilderVA uint64
+	// registrationDialogVTableEntry is the virtual address of its dispatch slot.
 	registrationDialogVTableEntry uint64
-	registrationDialogRelocOff    int
-	registrationDialogFuncVA      uint64
-	manualDialogVTableEntryVA     uint64
-	manualDialogFuncVA            uint64
-	dialogFieldOffset             byte
+	// registrationDialogRelocOff is the file offset of that slot's ELF relocation.
+	registrationDialogRelocOff int
+	// registrationDialogFuncVA is the original target of the registration slot.
+	registrationDialogFuncVA uint64
+	// manualDialogVTableEntryVA locates the existing manual-dialog dispatch slot.
+	manualDialogVTableEntryVA uint64
+	// manualDialogFuncVA is the original manual-dialog handler used by the wrapper.
+	manualDialogFuncVA uint64
+	// dialogFieldOffset locates the dialog pointer within CSRegistrationCenter_LINUX.
+	dialogFieldOffset byte
 }
 
+// Linux x86-64 Navicat Premium 17.3.10. Never use these offsets on another build.
 var profile17310 = libraryProfile{
-	title:                         "Navicat 17.3.10 Premium EN",
-	productName:                   "Navicat 17",
-	keyFilePrefix:                 "navicat17-crack-key-",
 	sha256:                        "594d51de75803894071a0651d8c9f7017f2bfe7fabacf8a87352b5f1169de3b2",
-	serialVersion:                 17,
-	language:                      "en",
 	originalBuilderPrefix:         originalBuilderPrefix,
 	oldKeyBase64:                  oldKeyBase64,
-	keyBuilderVA:                  keyBuilderVA,
-	keyBuilderEndVA:               keyBuilderEndVA,
-	publicKeyStorageVA:            publicKeyStorageVA,
-	manualWrapperVA:               manualWrapperVA,
-	appendVA:                      appendVA,
-	registrationDialogBuilderVA:   registrationDialogBuilderVA,
-	registrationDialogVTableEntry: registrationDialogVTableEntryVA,
-	registrationDialogRelocOff:    registrationDialogRelocOff,
-	registrationDialogFuncVA:      registrationDialogFuncVA,
-	manualDialogVTableEntryVA:     manualDialogVTableEntryVA,
-	manualDialogFuncVA:            manualDialogFuncVA,
+	keyBuilderVA:                  0x958ecb0,
+	keyBuilderEndVA:               0x958ed9e,
+	publicKeyStorageVA:            0x3079000,
+	manualWrapperVA:               0x958ecf0,
+	appendVA:                      0x5f0d1f0,
+	registrationDialogBuilderVA:   0x9584ac0,
+	registrationDialogVTableEntry: 0xb404c98,
+	registrationDialogRelocOff:    0x4949d0,
+	registrationDialogFuncVA:      0x95b71a0,
+	manualDialogVTableEntryVA:     0xb404d08,
+	manualDialogFuncVA:            0x9582ae0,
 	dialogFieldOffset:             0x70,
 }
 
 // Linux x86-64 Navicat Premium 18.0.2. These addresses were checked against
 // the original ELF's code, vtable and R_X86_64_RELATIVE relocation.
 var profile1802 = libraryProfile{
-	title:                         "Navicat 18.0.2 Premium EN",
-	productName:                   "Navicat 18",
-	keyFilePrefix:                 "navicat18-crack-key-",
 	sha256:                        "6c45353fea04ba4b941aef2477fe9fa4997c77cee6380c3abc60f87f404e8e57",
-	serialVersion:                 18,
-	language:                      "en",
 	originalBuilderPrefix:         originalBuilderPrefix,
 	oldKeyBase64:                  oldKeyBase64,
 	keyBuilderVA:                  0xa06c070,
@@ -131,8 +105,8 @@ var profile1802 = libraryProfile{
 
 var supportedProfiles = []*libraryProfile{&profile17310, &profile1802}
 
-func privateKeyPath(profile *libraryProfile) string {
-	return filepath.Join("/tmp", profile.keyFilePrefix+profile.sha256[:12]+".pem")
+func privateKeyPath(version string) string {
+	return filepath.Join("/tmp", "navicat-crack-private-key-"+version+".pem")
 }
 
 func saveNewPrivateKey(path string, replace bool) error {

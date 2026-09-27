@@ -43,15 +43,12 @@ func TestRecoveredOriginalKey(t *testing.T) {
 }
 
 func TestPrivateKeyPathAndRegeneration(t *testing.T) {
-	want := filepath.Join("/tmp", "navicat17-crack-key-"+"594d51de75803894071a0651d8c9f7017f2bfe7fabacf8a87352b5f1169de3b2"[:12]+".pem")
-	if got := privateKeyPath(&profile17310); got != want {
+	want := filepath.Join("/tmp", "navicat-crack-private-key-18.0.2.pem")
+	if got := privateKeyPath("18.0.2"); got != want {
 		t.Fatalf("key path = %q, want %q", got, want)
 	}
-
-	other := profile17310
-	other.sha256 = "abcdef012345" + "594d51de75803894071a0651d8c9f7017f2bfe7fabacf8a87352b5f1169de3b2"[12:]
-	if got := privateKeyPath(&other); got != filepath.Join("/tmp", "navicat17-crack-key-abcdef012345.pem") {
-		t.Fatalf("another build's key path = %q", got)
+	if got := privateKeyPath("17.3.10"); got != filepath.Join("/tmp", "navicat-crack-private-key-17.3.10.pem") {
+		t.Fatalf("Navicat 17 key path = %q", got)
 	}
 
 	path := filepath.Join(t.TempDir(), "key.pem")
@@ -450,13 +447,13 @@ func TestKeyBuilderPayload(t *testing.T) {
 		t.Fatalf("payload length = %d", len(stub))
 	}
 
-	leaTarget := int64(keyBuilderVA+30) + int64(int32(binary.LittleEndian.Uint32(stub[26:30])))
-	callTarget := int64(keyBuilderVA+35) + int64(int32(binary.LittleEndian.Uint32(stub[31:35])))
-	if leaTarget != int64(publicKeyStorageVA) || callTarget != int64(appendVA) {
+	leaTarget := int64(profile17310.keyBuilderVA+30) + int64(int32(binary.LittleEndian.Uint32(stub[26:30])))
+	callTarget := int64(profile17310.keyBuilderVA+35) + int64(int32(binary.LittleEndian.Uint32(stub[31:35])))
+	if leaTarget != int64(profile17310.publicKeyStorageVA) || callTarget != int64(profile17310.appendVA) {
 		t.Fatalf("wrong payload target(s): lea=%#x call=%#x", leaTarget, callTarget)
 	}
 
-	if keyBuilderVA+uint64(len(stub)) >= keyBuilderEndVA {
+	if profile17310.keyBuilderVA+uint64(len(stub)) >= profile17310.keyBuilderEndVA {
 		t.Fatal("key builder overlaps the next function")
 	}
 }
@@ -471,13 +468,13 @@ func TestManualWrapperTargets(t *testing.T) {
 		t.Fatalf("unexpected wrapper guard: %x", stub)
 	}
 
-	callTarget := int64(manualWrapperVA+16) + int64(int32(binary.LittleEndian.Uint32(stub[12:16])))
-	jumpTarget := int64(manualWrapperVA+25) + int64(int32(binary.LittleEndian.Uint32(stub[21:25])))
-	if callTarget != int64(registrationDialogBuilderVA) || jumpTarget != int64(manualDialogFuncVA) {
+	callTarget := int64(profile17310.manualWrapperVA+16) + int64(int32(binary.LittleEndian.Uint32(stub[12:16])))
+	jumpTarget := int64(profile17310.manualWrapperVA+25) + int64(int32(binary.LittleEndian.Uint32(stub[21:25])))
+	if callTarget != int64(profile17310.registrationDialogBuilderVA) || jumpTarget != int64(profile17310.manualDialogFuncVA) {
 		t.Fatalf("wrong wrapper target(s): call=%#x jump=%#x", callTarget, jumpTarget)
 	}
 
-	if manualWrapperVA+uint64(len(stub)) >= keyBuilderEndVA {
+	if profile17310.manualWrapperVA+uint64(len(stub)) >= profile17310.keyBuilderEndVA {
 		t.Fatal("manual wrapper overlaps the next function")
 	}
 
