@@ -22,7 +22,6 @@ import (
 // These addresses and the SHA-256 identify the original Linux x86-64 17.3.10
 // libcc.so. Never use these offsets on a different build.
 const (
-	originalSHA256                  = "594d51de75803894071a0651d8c9f7017f2bfe7fabacf8a87352b5f1169de3b2"
 	keyBuilderVA                    = uint64(0x958ecb0)
 	keyBuilderEndVA                 = uint64(0x958ed9e)
 	publicKeyStorageVA              = uint64(0x3079000)
@@ -83,10 +82,10 @@ type libraryProfile struct {
 }
 
 var profile17310 = libraryProfile{
-	title:                         "Navicat 17 Premium (EN) Crack (2026)",
+	title:                         "Navicat 17.3.10 Premium EN",
 	productName:                   "Navicat 17",
 	keyFilePrefix:                 "navicat17-crack-key-",
-	sha256:                        originalSHA256,
+	sha256:                        "594d51de75803894071a0651d8c9f7017f2bfe7fabacf8a87352b5f1169de3b2",
 	serialVersion:                 17,
 	language:                      "en",
 	originalBuilderPrefix:         originalBuilderPrefix,
@@ -108,7 +107,7 @@ var profile17310 = libraryProfile{
 // Linux x86-64 Navicat Premium 18.0.2. These addresses were checked against
 // the original ELF's code, vtable and R_X86_64_RELATIVE relocation.
 var profile1802 = libraryProfile{
-	title:                         "Navicat 18 Premium (EN) Crack (2026)",
+	title:                         "Navicat 18.0.2 Premium EN",
 	productName:                   "Navicat 18",
 	keyFilePrefix:                 "navicat18-crack-key-",
 	sha256:                        "6c45353fea04ba4b941aef2477fe9fa4997c77cee6380c3abc60f87f404e8e57",

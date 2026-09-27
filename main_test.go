@@ -43,13 +43,13 @@ func TestRecoveredOriginalKey(t *testing.T) {
 }
 
 func TestPrivateKeyPathAndRegeneration(t *testing.T) {
-	want := filepath.Join("/tmp", "navicat17-crack-key-"+originalSHA256[:12]+".pem")
+	want := filepath.Join("/tmp", "navicat17-crack-key-"+"594d51de75803894071a0651d8c9f7017f2bfe7fabacf8a87352b5f1169de3b2"[:12]+".pem")
 	if got := privateKeyPath(&profile17310); got != want {
 		t.Fatalf("key path = %q, want %q", got, want)
 	}
 
 	other := profile17310
-	other.sha256 = "abcdef012345" + originalSHA256[12:]
+	other.sha256 = "abcdef012345" + "594d51de75803894071a0651d8c9f7017f2bfe7fabacf8a87352b5f1169de3b2"[12:]
 	if got := privateKeyPath(&other); got != filepath.Join("/tmp", "navicat17-crack-key-abcdef012345.pem") {
 		t.Fatalf("another build's key path = %q", got)
 	}
@@ -370,7 +370,7 @@ func TestCommandOutputRendersAboveSingleMenu(t *testing.T) {
 	var output bytes.Buffer
 	renderInteractiveScreen(
 		&output,
-		"Navicat 17 Premium (EN) Crack (2026)\n\nlibcc.so found: /app/usr/lib/libcc.so\nSHA-256: test ✅\n",
+		"Navicat Linux Crack (2026)\n\nhttps://github.com/lexakimov/navicat-linux-crack\n\nNavicat 17.3.10 Premium EN\nlibcc.so found: /app/usr/lib/libcc.so\nSHA-256: test ✅\n",
 		[]string{
 			"[2] Key generated: /tmp/key.pem",
 			"License key: NAVC-TEST-TEST-TEST",

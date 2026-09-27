@@ -79,7 +79,7 @@ func newInteractiveSession(root string, input io.Reader, output io.Writer) (*int
 	}
 
 	header := fmt.Sprintf(
-		"%s\n\nlibcc.so found: %s\nSHA-256: %s ✅\n",
+		"Navicat Linux Crack (2026)\n\nhttps://github.com/lexakimov/navicat-linux-crack\n\n%s\nlibcc.so found: %s\nSHA-256: %s ✅\n",
 		library.profile.title,
 		library.path,
 		library.profile.sha256,
