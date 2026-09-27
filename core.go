@@ -2,17 +2,14 @@ package main
 
 import (
 	"bytes"
-	"crypto/des"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"debug/elf"
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -20,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // These addresses and the SHA-256 identify the original Linux x86-64 17.3.10
@@ -111,16 +107,7 @@ var profile17310 = libraryProfile{
 
 var supportedProfiles = []*libraryProfile{&profile17310}
 
-func makePrivateKeyPEM() ([]byte, error) {
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, err
-	}
-
-	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}), nil
-}
-
-func cryptographicKeyPath(profile *libraryProfile) string {
+func privateKeyPath(profile *libraryProfile) string {
 	return filepath.Join("/tmp", profile.keyFilePrefix+profile.sha256[:12]+".pem")
 }
 
@@ -134,7 +121,16 @@ func saveNewPrivateKey(path string, replace bool) error {
 		return writeNewFile(path, data, 0o600)
 	}
 
-	return replaceFileAtomically(path, ".cryptographic-key-*", data, 0o600)
+	return replaceFileAtomically(path, ".private-key-*", data, 0o600)
+}
+
+func makePrivateKeyPEM() ([]byte, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+
+	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}), nil
 }
 
 func checkOriginal(data []byte, profile *libraryProfile) (int, error) {
@@ -525,104 +521,10 @@ func replaceFileAtomically(path, pattern string, data []byte, mode os.FileMode) 
 	return os.Rename(tmp.Name(), path)
 }
 
-var languageSignatures = map[string][2]byte{
-	"en": {0xac, 0x88}, "zh-cn": {0xce, 0x32}, "zh-tw": {0xaa, 0x99},
-	"ja": {0xad, 0x82}, "pl": {0xbb, 0x55}, "es": {0xae, 0x10},
-	"fr": {0xfa, 0x20}, "de": {0xb1, 0x60}, "ko": {0xb5, 0x60},
-	"ru": {0xee, 0x16}, "pt": {0xcd, 0x49},
-}
-
-func generateSerial(version int, language string, salt [3]byte) (string, error) {
-	if version < 16 || version >= 32 {
-		return "", errors.New("this generator supports versions 16 through 31")
-	}
-
-	sig, ok := languageSignatures[language]
-	if !ok {
-		return "", fmt.Errorf("unsupported language %q", language)
-	}
-
-	data := [10]byte{0x68, 0x2a, salt[0], salt[1], salt[2], sig[0], sig[1], 0x65, byte((version - 16) << 4), 0x32}
-	key := [8]byte{0xe9, 0x7f, 0xb0, 0x60, 0x77, 0x45, 0x90, 0xae}
-
-	block, err := des.NewCipher(key[:])
-	if err != nil {
-		return "", err
-	}
-
-	block.Encrypt(data[2:10], data[2:10])
-	s := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(data[:])
-	s = strings.NewReplacer("I", "8", "O", "9").Replace(s)
-
-	return s[0:4] + "-" + s[4:8] + "-" + s[8:12] + "-" + s[12:16], nil
-}
-
-func makeActivationResponse(
-	priv *rsa.PrivateKey,
-	requestBase64, name, org string,
-	when time.Time,
-) (string, string, error) {
-	clean := strings.Join(strings.Fields(requestBase64), "")
-
-	ciphertext, err := base64.StdEncoding.DecodeString(clean)
-	if err != nil {
-		return "", "", err
-	}
-
-	if len(ciphertext) != priv.Size() {
-		return "", "", fmt.Errorf("request size is %d bytes; expected %d", len(ciphertext), priv.Size())
-	}
-
-	plain, err := rsa.DecryptPKCS1v15(rand.Reader, priv, ciphertext)
-	if err != nil {
-		return "", "", fmt.Errorf("request does not decrypt with this private key: %w", err)
-	}
-
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(plain, &obj); err != nil {
-		return "", "", fmt.Errorf("request is not JSON: %w", err)
-	}
-
-	if obj == nil {
-		return "", "", errors.New("request is not a JSON object")
-	}
-
-	delete(obj, "P")
-	obj["N"], _ = json.Marshal(name)
-	obj["O"], _ = json.Marshal(org)
-	obj["T"], _ = json.Marshal(when.Unix())
-
-	response, err := json.Marshal(obj)
-	if err != nil {
-		return "", "", err
-	}
-
-	if len(response) > 240 {
-		return "", "", fmt.Errorf("response JSON is %d bytes; maximum 240", len(response))
-	}
-
-	sig, err := rsa.SignPKCS1v15(rand.Reader, priv, 0, response)
-	if err != nil {
-		return "", "", err
-	}
-
-	return base64.StdEncoding.EncodeToString(sig), string(plain), nil
-}
-
 type libraryFile struct {
 	path    string
 	profile *libraryProfile
 	patched bool
-}
-
-func profileForSHA256(sum string, profiles []*libraryProfile) *libraryProfile {
-	for _, profile := range profiles {
-		if sum == profile.sha256 {
-			return profile
-		}
-	}
-
-	return nil
 }
 
 func findLibrary(root string) (libraryFile, error) {
@@ -680,6 +582,16 @@ func findLibraryWithProfiles(root string, profiles []*libraryProfile) (libraryFi
 		sum,
 		strings.Join(expected, ", "),
 	)
+}
+
+func profileForSHA256(sum string, profiles []*libraryProfile) *libraryProfile {
+	for _, profile := range profiles {
+		if sum == profile.sha256 {
+			return profile
+		}
+	}
+
+	return nil
 }
 
 func fileSHA256(path string) (string, error) {

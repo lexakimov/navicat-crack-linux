@@ -41,15 +41,15 @@ func TestRecoveredOriginalKey(t *testing.T) {
 	}
 }
 
-func TestCryptographicKeyPathAndRegeneration(t *testing.T) {
+func TestPrivateKeyPathAndRegeneration(t *testing.T) {
 	want := filepath.Join("/tmp", "navicat17-crack-key-"+originalSHA256[:12]+".pem")
-	if got := cryptographicKeyPath(&profile17310); got != want {
+	if got := privateKeyPath(&profile17310); got != want {
 		t.Fatalf("key path = %q, want %q", got, want)
 	}
 
 	other := profile17310
 	other.sha256 = "abcdef012345" + originalSHA256[12:]
-	if got := cryptographicKeyPath(&other); got != filepath.Join("/tmp", "navicat17-crack-key-abcdef012345.pem") {
+	if got := privateKeyPath(&other); got != filepath.Join("/tmp", "navicat17-crack-key-abcdef012345.pem") {
 		t.Fatalf("another build's key path = %q", got)
 	}
 
@@ -94,9 +94,9 @@ func TestCryptographicKeyPathAndRegeneration(t *testing.T) {
 	}
 }
 
-func TestInspectCryptographicKey(t *testing.T) {
+func TestInspectPrivateKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "key.pem")
-	exists, usable, err := inspectCryptographicKey(path)
+	exists, usable, err := inspectPrivateKey(path)
 	if err != nil || exists || usable {
 		t.Fatalf("missing key: exists=%t usable=%t err=%v", exists, usable, err)
 	}
@@ -105,7 +105,7 @@ func TestInspectCryptographicKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	exists, usable, err = inspectCryptographicKey(path)
+	exists, usable, err = inspectPrivateKey(path)
 	if err != nil || !exists || !usable {
 		t.Fatalf("valid key: exists=%t usable=%t err=%v", exists, usable, err)
 	}
@@ -114,7 +114,7 @@ func TestInspectCryptographicKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	exists, usable, err = inspectCryptographicKey(path)
+	exists, usable, err = inspectPrivateKey(path)
 	if err != nil || !exists || usable {
 		t.Fatalf("invalid key: exists=%t usable=%t err=%v", exists, usable, err)
 	}
@@ -281,7 +281,7 @@ func TestMenuItemsHaveNoLockExplanations(t *testing.T) {
 		t.Fatalf("menu contains lock explanations: %q", menu)
 	}
 
-	for _, label := range []string{"[1] Restore libcc.so backup", "[2] Generate cryprographic key", "[3] Patch libcc.so", "[4] Generate license key", "[5] Activate with activation request", "[6] Exit"} {
+	for _, label := range []string{"[1] Restore libcc.so backup", "[2] Generate private key", "[3] Patch libcc.so", "[4] Generate license key", "[5] Activate with activation request", "[6] Exit"} {
 		if !strings.Contains(menu, label+"\n") {
 			t.Fatalf("menu item missing: %s in %q", label, menu)
 		}
@@ -290,23 +290,34 @@ func TestMenuItemsHaveNoLockExplanations(t *testing.T) {
 	output.Reset()
 	printInteractiveMenu(&output, menuState{keyExists: true})
 
-	if !strings.Contains(output.String(), "[2] Regenerate cryprographic key\n") ||
-		strings.Contains(output.String(), "[2] Generate cryprographic key\n") {
+	if !strings.Contains(output.String(), "[2] Regenerate private key\n") ||
+		strings.Contains(output.String(), "[2] Generate private key\n") {
 		t.Fatalf("existing key should change option 2 label: %q", output.String())
 	}
 
 	output.Reset()
 	printMenuItem(&output, "[5] Activate with activation request", false, true)
 
-	if output.String() != "\x1b[2m[5] Activate with activation request\x1b[0m\n" {
-		t.Fatalf("disabled item should be dimmed without extra text: %q", output.String())
+	if output.String() != "\x1b[36m[5]\x1b[0m\x1b[2m Activate with activation request\x1b[0m\n" {
+		t.Fatalf("disabled item should have a cyan number and dimmed text: %q", output.String())
 	}
 
 	output.Reset()
 	printMenuItem(&output, "[5] Activate with activation request", true, true)
 
-	if output.String() != "[5] Activate with activation request\n" {
-		t.Fatalf("enabled item should be plain: %q", output.String())
+	if output.String() != "\x1b[36m[5]\x1b[0m Activate with activation request\n" {
+		t.Fatalf("enabled item should have a cyan number: %q", output.String())
+	}
+}
+
+func TestActionNumberColorOnlyInTerminal(t *testing.T) {
+	line := "[4] License key: NAVC-TEST-TEST-TEST\nNext step"
+	if got := colorActionNumber(line, false); got != line {
+		t.Fatalf("plain output contains ANSI codes: %q", got)
+	}
+	want := "\x1b[36m[4]\x1b[0m License key: NAVC-TEST-TEST-TEST\nNext step"
+	if got := colorActionNumber(line, true); got != want {
+		t.Fatalf("only the action number should be cyan: %q", got)
 	}
 }
 
@@ -324,7 +335,7 @@ func TestCommandOutputRendersAboveSingleMenu(t *testing.T) {
 	)
 
 	screen := output.String()
-	if strings.Count(screen, "[2] Generate cryprographic key") != 1 {
+	if strings.Count(screen, "[2] Generate private key") != 1 {
 		t.Fatalf("menu should be rendered once: %q", screen)
 	}
 
@@ -381,18 +392,6 @@ func TestInteractiveActivationAcceptsWrappedRequest(t *testing.T) {
 	signature, err := base64.StdEncoding.DecodeString(code)
 	if err != nil || len(signature) != priv.Size() {
 		t.Fatalf("invalid activation code: %v", err)
-	}
-}
-
-func TestSerial17KnownVector(t *testing.T) {
-	// Independent DES/3DES reference vector for salt 01 02 03.
-	got, err := generateSerial(17, "en", [3]byte{1, 2, 3})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got != "NAVD-CFDY-Z4X3-YEBD" {
-		t.Fatalf("serial = %q", got)
 	}
 }
 

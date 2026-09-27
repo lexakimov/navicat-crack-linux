@@ -17,7 +17,7 @@ This tool currently supports the Linux x86_64 **Navicat Premium 17.3.10** build.
    go run . /path/to/squashfs-root
    ```
 
-   Follow the necessary menu steps in order: generate a cryptographic key, patch `libcc.so`, generate a license key, and complete manual activation.
+   Follow the necessary menu steps in order: generate a private key, patch `libcc.so`, generate a license key, and complete manual activation.
 
 4. Return to the directory containing `squashfs-root`, download `appimagetool`, and repack the modified directory:
 
